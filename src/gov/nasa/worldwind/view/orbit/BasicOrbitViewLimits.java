@@ -30,7 +30,7 @@ public class BasicOrbitViewLimits extends BasicViewPropertyLimits implements Orb
         this.minPitch = Angle.ZERO;
         this.maxPitch = Angle.POS90;
         this.minZoom = 0;
-        this.maxZoom = 1000000000;
+        this.maxZoom = 900000000;
     }
 
     public Sector getCenterLocationLimits()

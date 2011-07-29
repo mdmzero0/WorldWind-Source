@@ -519,86 +519,100 @@ private ArrayList<RectTile> createTopLevelTiles(DrawContext dc)
         return latlons;
     }
 
-    private void renderMultiTexture(DrawContext dc, RectTile tile,
-			int numTextureUnits)
-	{
-		if (dc == null)
-		{
-			String msg = Logging.getMessage("nullValue.DrawContextIsNull");
-			Logging.logger().severe(msg);
-			throw new IllegalArgumentException(msg);
-		}
+    protected void renderMultiTexture(DrawContext dc, RectTile tile, int numTextureUnits)
+    {
+        if (dc == null)
+        {
+            String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
 
-		if (numTextureUnits < 1)
-		{
-			String msg = Logging
-					.getMessage("generic.NumTextureUnitsLessThanOne");
-			Logging.logger().severe(msg);
-			throw new IllegalArgumentException(msg);
-		}
+        if (numTextureUnits < 1)
+        {
+            String msg = Logging.getMessage("generic.NumTextureUnitsLessThanOne");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
 
-		this.render(dc, tile, numTextureUnits);
-	}
+        this.render(dc, tile, numTextureUnits);
+    }
 
-	private void render(DrawContext dc, RectTile tile)
-	{
-		if (dc == null)
-		{
-			String msg = Logging.getMessage("nullValue.DrawContextIsNull");
-			Logging.logger().severe(msg);
-			throw new IllegalArgumentException(msg);
-		}
+    protected void render(DrawContext dc, RectTile tile)
+    {
+        if (dc == null)
+        {
+            String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
 
-		this.render(dc, tile, 1);
-	}
+        this.render(dc, tile, 1);
+    }
 
-	private long render(DrawContext dc, RectTile tile, int numTextureUnits)
-	{
-		if (tile.ri == null)
-		{
-			String msg = Logging.getMessage("nullValue.RenderInfoIsNull");
-			Logging.logger().severe(msg);
-			throw new IllegalStateException(msg);
-		}
+	    protected long render(DrawContext dc, RectTile tile, int numTextureUnits)
+    {
+        if (tile.ri == null)
+        {
+            String msg = Logging.getMessage("nullValue.RenderInfoIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalStateException(msg);
+        }
 
-		dc.getView().pushReferenceCenter(dc, tile.ri.referenceCenter);
+        if (dc.getGLRuntimeCapabilities().isUseVertexBufferObject())
+        {
+            if (!this.renderVBO(dc, tile, numTextureUnits))
+            {
+                // Fall back to VA rendering. This is an error condition at this point because something went wrong with
+                // VBO fill or binding. But we can still probably draw the tile using vertex arrays.
+                dc.getGL().glBindBuffer(GL.GL_ARRAY_BUFFER, 0);
+                dc.getGL().glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0);
+                this.renderVA(dc, tile, numTextureUnits);
+            }
+        }
+        else
+        {
+            this.renderVA(dc, tile, numTextureUnits);
+        }
 
-        if (!dc.isPickingMode() && this.lightDirection != null)
-            beginLighting(dc);
+        return tile.ri.indices.limit() - 2; // return number of triangles rendered
+    }
 
+    protected void renderVA(DrawContext dc, RectTile tile, int numTextureUnits)
+    {
         GL gl = dc.getGL();
-		gl.glPushClientAttrib(GL.GL_CLIENT_VERTEX_ARRAY_BIT);
-		gl.glEnableClientState(GL.GL_VERTEX_ARRAY);
-		gl.glVertexPointer(3, GL.GL_DOUBLE, 0, tile.ri.vertices.rewind());
 
-		gl.glEnableClientState(GL.GL_NORMAL_ARRAY);
-		gl.glNormalPointer(GL.GL_DOUBLE, 0, tile.ri.normals.rewind());
+        gl.glVertexPointer(3, GL.GL_FLOAT, 0, tile.ri.vertices.rewind());
 
-		for (int i = 0; i < numTextureUnits; i++)
-		{
-			gl.glClientActiveTexture(GL.GL_TEXTURE0 + i);
-			gl.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY);
+        for (int i = 0; i < numTextureUnits; i++)
+        {
+            gl.glClientActiveTexture(GL.GL_TEXTURE0 + i);
+            gl.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY);
             Object texCoords = dc.getValue(AVKey.TEXTURE_COORDINATES);
             if (texCoords != null && texCoords instanceof DoubleBuffer)
-                gl.glTexCoordPointer(2, GL.GL_DOUBLE, 0, ((DoubleBuffer) texCoords).rewind());
+                gl.glTexCoordPointer(2, GL.GL_FLOAT, 0, ((DoubleBuffer) texCoords).rewind());
             else
-                gl.glTexCoordPointer(2, GL.GL_DOUBLE, 0, tile.ri.texCoords.rewind());
-		}
+                gl.glTexCoordPointer(2, GL.GL_FLOAT, 0, tile.ri.texCoords.rewind());
+        }
 
-		gl.glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP,
-				tile.ri.indices.limit(), javax.media.opengl.GL.GL_UNSIGNED_INT,
-				tile.ri.indices.rewind());
+        gl.glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP, tile.ri.indices.limit(),
+            javax.media.opengl.GL.GL_UNSIGNED_INT, tile.ri.indices.rewind());
+    }
 
-		gl.glDisableClientState(GL.GL_NORMAL_ARRAY);
-		gl.glPopClientAttrib();
-
-        if (!dc.isPickingMode() && this.lightDirection != null)
-            endLighting(dc);
-
-        dc.getView().popReferenceCenter(dc);
-
-		return tile.ri.indices.limit() - 2; // return number of triangles rendered
-	}
+    protected boolean renderVBO(DrawContext dc, RectTile tile, int numTextureUnits)
+    {
+        if (tile.ri.isVboBound || this.bindVbos(dc, tile, numTextureUnits))
+        {
+            // Render the tile
+            dc.getGL().glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP, tile.ri.indices.limit(),
+                javax.media.opengl.GL.GL_UNSIGNED_INT, 0);
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
 
     private void beginLighting(DrawContext dc)
     {
@@ -634,61 +648,95 @@ private ArrayList<RectTile> createTopLevelTiles(DrawContext dc)
         gl.glPopAttrib();
     }
 
-    private void renderWireframe(DrawContext dc, RectTile tile,
-			boolean showTriangles, boolean showTileBoundary)
-	{
-		if (dc == null)
-		{
-			String msg = Logging.getMessage("nullValue.DrawContextIsNull");
-			Logging.logger().severe(msg);
-			throw new IllegalArgumentException(msg);
-		}
+        protected void renderWireframe(DrawContext dc, RectTile tile, boolean showTriangles, boolean showTileBoundary)
+    {
+        if (dc == null)
+        {
+            String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
 
-		if (tile.ri == null)
-		{
-			String msg = Logging.getMessage("nullValue.RenderInfoIsNull");
-			Logging.logger().severe(msg);
-			throw new IllegalStateException(msg);
-		}
+        if (tile.ri == null)
+        {
+            String msg = Logging.getMessage("nullValue.RenderInfoIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalStateException(msg);
+        }
 
-		java.nio.IntBuffer indices = getIndices(tile.ri.density);
-		indices.rewind();
+        dc.getView().pushReferenceCenter(dc, tile.ri.referenceCenter);
 
-		dc.getView().pushReferenceCenter(dc, tile.ri.referenceCenter);
+        javax.media.opengl.GL gl = dc.getGL();
+        gl.glPushAttrib(
+            GL.GL_DEPTH_BUFFER_BIT | GL.GL_POLYGON_BIT | GL.GL_ENABLE_BIT | GL.GL_CURRENT_BIT);
+        gl.glEnable(GL.GL_BLEND);
+        gl.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE);
+        gl.glDisable(javax.media.opengl.GL.GL_DEPTH_TEST);
+        gl.glEnable(javax.media.opengl.GL.GL_CULL_FACE);
+        gl.glCullFace(javax.media.opengl.GL.GL_BACK);
+        gl.glColor4d(1d, 1d, 1d, 0.2);
+        gl.glPolygonMode(javax.media.opengl.GL.GL_FRONT, javax.media.opengl.GL.GL_LINE);
 
-		javax.media.opengl.GL gl = dc.getGL();
-		gl.glPushAttrib(GL.GL_DEPTH_BUFFER_BIT | GL.GL_POLYGON_BIT
-				| GL.GL_TEXTURE_BIT | GL.GL_ENABLE_BIT | GL.GL_CURRENT_BIT);
-		gl.glEnable(GL.GL_BLEND);
-		gl.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE);
-		gl.glDisable(javax.media.opengl.GL.GL_DEPTH_TEST);
-		gl.glEnable(javax.media.opengl.GL.GL_CULL_FACE);
-		gl.glCullFace(javax.media.opengl.GL.GL_BACK);
-		gl.glDisable(javax.media.opengl.GL.GL_TEXTURE_2D);
-		gl.glColor4d(1d, 1d, 1d, 0.2);
-		gl.glPolygonMode(javax.media.opengl.GL.GL_FRONT,
-				javax.media.opengl.GL.GL_LINE);
+        if (showTriangles)
+        {
+            OGLStackHandler ogsh = new OGLStackHandler();
 
-		if (showTriangles)
-		{
-			gl.glPushClientAttrib(GL.GL_CLIENT_VERTEX_ARRAY_BIT);
-			gl.glEnableClientState(GL.GL_VERTEX_ARRAY);
+            try
+            {
+                ogsh.pushClientAttrib(gl, GL.GL_CLIENT_VERTEX_ARRAY_BIT);
 
-			gl.glVertexPointer(3, GL.GL_DOUBLE, 0, tile.ri.vertices);
-			gl.glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP, indices
-					.limit(), javax.media.opengl.GL.GL_UNSIGNED_INT, indices);
+                gl.glEnableClientState(GL.GL_VERTEX_ARRAY);
 
-			gl.glPopClientAttrib();
-		}
+                gl.glVertexPointer(3, GL.GL_FLOAT, 0, tile.ri.vertices.rewind());
+                gl.glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP, tile.ri.indices.limit(),
+                    javax.media.opengl.GL.GL_UNSIGNED_INT, tile.ri.indices.rewind());
+            }
+            finally
+            {
+                ogsh.pop(gl);
+            }
+        }
 
-		dc.getView().popReferenceCenter(dc);
+        dc.getView().popReferenceCenter(dc);
 
-		if (showTileBoundary)
-			this.renderPatchBoundary(dc, tile, gl);
+        gl.glPopAttrib();
 
-		gl.glPopAttrib();
-	}
+        if (showTileBoundary)
+            this.renderPatchBoundary(dc, tile);
+    }
+        
+         protected void renderPatchBoundary(DrawContext dc, RectTile tile)
+    {
+        GL gl = dc.getGL();
+        OGLStackHandler ogsh = new OGLStackHandler();
 
+        ogsh.pushAttrib(gl, GL.GL_ENABLE_BIT | GL.GL_CURRENT_BIT | GL.GL_POLYGON_BIT);
+        try
+        {
+            gl.glDisable(GL.GL_BLEND);
+
+            // Don't perform depth clipping but turn on backface culling
+            gl.glDisable(GL.GL_DEPTH_TEST);
+            gl.glEnable(GL.GL_CULL_FACE);
+            gl.glCullFace(GL.GL_BACK);
+            gl.glPolygonMode(GL.GL_FRONT, GL.GL_LINE);
+
+            Vec4[] corners = tile.sector.computeCornerPoints(dc.getGlobe(), dc.getVerticalExaggeration());
+
+            gl.glColor4d(1d, 0, 0, 1d);
+            gl.glBegin(javax.media.opengl.GL.GL_QUADS);
+            gl.glVertex3d(corners[0].x, corners[0].y, corners[0].z);
+            gl.glVertex3d(corners[1].x, corners[1].y, corners[1].z);
+            gl.glVertex3d(corners[2].x, corners[2].y, corners[2].z);
+            gl.glVertex3d(corners[3].x, corners[3].y, corners[3].z);
+            gl.glEnd();
+        }
+        finally
+        {
+            ogsh.pop(gl);
+        }
+    }
+        
 	private void renderPatchBoundary(DrawContext dc, RectTile tile, GL gl)
 	{
 		// TODO: Currently only works if called from renderWireframe because no state is set here.
